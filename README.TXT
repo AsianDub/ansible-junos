@@ -1,79 +1,115 @@
-HOW THE ANSIBLE PLAYBOOK FILE AND FOLDER HIERARCHY WORKS
-========================================================
-This is my best attempt at explaining it.  Hopefully it makes sense...
+Design Goals and Guidelines
+===========================
 
-The Document Root (That's where you found this file!)
------------------------------------------------------
-Put your playbooks here.  You will also find the file env-setup which you can
-source from your shell to set some useful environment variables.
+Goals
+-----
+These goals are incremental.  They are laid out as they are to be a set of waypoints on
+our journey.  So we want to have a really nice solution for Goal #1 before we take on
+Goal #2.  Even if we can't re-use everything, what we learn along the way could be just
+as valuable.
+
+1.  Create an extensible playbook that builds the guts of a "standard" Junos config
+    file.
+    ---
+    What does standard mean?  At it's simplest, it's the stuff that goes in every config
+    file in an enterprise.  If you think about the way most enterprises operate, they
+    usually have the same service resources (SYSLOG, NTP, and RADIUS servers, etc.), user
+    classes, etc. defined in every networking device.  In large organizations, those
+    resources and definitions may vary by region, but there's still a whole lot of
+    sameness that can be addressed by a standard template.
+    
+    What's more is that even when things change (like the hostname and primary management
+    interface address) across devices, there's still a lot of sameness.  Every device
+    has a hostname, and therefore needs a "hostname xxxxx" statement in the config.
+    Every device has an interface that is the primary interface used for managing the
+    box, so we will need to create that interface and apply the appropriate IP address
+    to it.  In the case of a firewall, we may want to create a management zone and
+    policy that allow us to gain remote access to the box.  You get the idea.
+    
+2.  Completely abstract Junos from the user.
+    ---
+    Anyone who has ever tried to introduce Juniper into a Brand C environment has heard
+    the standard objection, "My people don't know Junos."  It would be nice to overcome
+    that objection by saying, "I can show you how to configure a Juniper platform without
+    Junos, using a tool your server team probably uses today."
+    
+3.  Enable true end-to-end, cross-platform implementations.
+    ---
+    OK maybe that's really tilting at windmills, but it's not impossible.  Once we start
+    extracting the variables from the config, it's very obvious that those variables
+    have relevance across a wide range of interconnected devices -- be they servers,
+    switches, routers, firewalls, and even applications.  If we do it right, we might
+    be able to get there.
+    
+Guidelines
+----------
+Note that for now, these guidelines are specific to creating Junos configuration files.
+Once we get good at that we can look at extending beyond Junos.
+
+1.  Hmm...
 
 
-The build/ folder
------------------
-This is where we're going to drop configs as we build them.  Each device gets
-its own folder under build, and the playbook build.pb.yml will build all of the
-necessary folders for us.
+Roles and Container Layout
+--------------------------
+So that we can coordinate modules across developers, we should use the following scheme
+for building elements of the complete config file.  The filenames have been chosen both
+to be descriptive and to assemble the Junos config file as it would be if you typed a
+series of config commands into the Junos CLI.
 
-The group_vars/ folder
-----------------------
-Got a variable where the value stays the same for more than one device?  Great!
-Create a file for it in the group_vars folder so that it can be associated with
-all the devices that share that value.  Now, if you want a play to pull values
-from variables in a file under group_vars, that file needs to share its name
-with the hosts entry under the play.  For example, if I have a play that
-creates a config file that is common to all Junos platforms, and it looks
-something like this:
+base_system --> 00_basic_system.conf
+---
+Here we create an apply-group called SYSTEM_BASICS that includes the following:
 
-- name: Build base system for Junos devices
-  hosts: junos
-  connection: local
-  gather_facts: no
-  roles:
-    - base_system
+    - Anything that goes in the system{} container that would be configured in all
+      devices.  This would include things like AAA (servers, order, user classes, etc.),
+      SYSLOG, NTP and DNS, etc.  If you have a single firewall in your enterprise that
+      also runs a DHCP server for a branch office, something that's not common to all
+      the other Junos devices in your enterprise, that config shouldn't go here.
+      
+    - The snmp{} container, again unless it varies widely between devices.
+    
+    - The device management interface.  Why?  So that typing "delete interfaces" from 
+      the top of the Junos config hierarchy doesn't cut you off when you forget to
+      confirm your commit.
+      
+    - A static route to the management network.  Hopefully your NOC and associated tools
+      are addresses out of a convenient supernet that we can turn into a static route,
+      or possibly a backup-router statement if you prefer, to keep your device reachable
+      as long as possible.
+      
+    - A series of prefix lists under policy-options {} that we can use to build a nice
+      Protect-RE firewall filter.
 
-then I'd better have a file named junos.yml in the group_vars folder.
+basic_firewall --> 04_basic_security.conf
+---
+Here we create an apply-group called SECURITY_BASICS that includes the following:
 
-The host_vars/ folder
----------------------
-Got a variable where the value is different for every device?  Great!  That
-variable belongs in a file in the host_vars folder.  Just like with the
-group_vars folder, names matter in host_vars.  Specifically, the name of the
-file here has to match the name of the host in your inventory.  So if you
-have host-specific variables to apply to a host that Ansible knows as "coke",
-then you need to name that file coke.yml.
+    - For firewall devices in packet-mode, generates the equivalent of the "set security
+      forwarding-options family mpls mode packet-based" command
+      
+    - For devices in flow mode, assigns the management interface to the security-zone
+      MGT, enables all system services in MGT, and creates a permit-all intra-zone
+      policy for MGT.
+      
+apply_groups --> 05_apply_groups.conf
+---
+Writes the "apply-groups xxxxx" statement immediately after the groups {} container.
 
-The hosts/ folder
------------------
-This is where your host definitions grow.  They can all be listed in a single
-file, or each type/group/etc. can have its own file.  You decide what works
-best for you.
+    - For firewalls, write "apply-groups [ SYSTEM_BASICS SECURITY_BASICS ];"
+    
+    - For all other devices, write "apply-groups [ SYSTEM_BASICS ];"
+    
+I'm not married to this filename.  It may change if we want to put more into the
+groups {} container.
 
-The packages/ folder
---------------------
-Got something like a software package that you want to keep with everything?
-Just put it here.  The packages folder is simply a holding pen.
+qfabric --> 10_fabric.conf
+            15_qf_interfaces.conf
+---
+For now, this role gets two tasks.
 
-The roles/ folder
------------------
-This is where the heavy lifting happens.  This folder includes a bunch of
-sub-folders, each pertaining to a specific role.  What is a role?  Best I can
-explain is that it's a series of tasks or configuration that applies to a group
-of objects.  So a role could be "router" or "firewall".  But it could also be
-broader or more specific.  For example, I have a role called base_system that
-builds config common to all Junos platforms.  I could have a role for firewall,
-but I could also have more specific roles for data center firewalls, DMZ
-services firewalls, etc.  Any object can be assigned to one or more roles.
-
-Under the roles/<role_name> folder, you will find folders named files, tasks,
-templates, and vars.  Not all may be present, depending on what you need for
-the role to operate.  Every role has at least one task associated with it, so
-you should always have a tasks folder with at least one file included there.
-
-Tasks generally work on templates, and that's just what you'll find under the
-templates folder.
-
-The files folder is optional.  Think of it as a holding pen for data you don't
-want to mix in with other templates or variables.
-
-The vars folder is also optional.  It's another place to put variables that are
-specific to the role.
+    - We want to write the contents of the fabric {} container -- all of the resources
+      and aliases -- to 10_qfabric.conf
+      
+    - We want to write the interface contents that are specific to QFabric --
+      interface-range and member-range containers to 15_qf_interfaces.conf at least
+      for now.  This may change.
