@@ -3,16 +3,18 @@ root_password_encrypted:
     "$1$bLPNN09I$miuAa4ZBoeP3Y7cUYB5LC/"
 
 name_servers:
-    - 192.168.168.13
+    - 192.168.168.15
+    - 192.168.168.16
     - 8.8.4.4
 
 ntp:
-    boot_server: 192.168.168.13
+    boot_server: 192.168.168.15
     servers:
-        - 192.168.168.13
+        - 192.168.168.15
+        - 192.168.168.16
 
 radius:
-    - server_ip: 192.168.168.13
+    - server_ip: 192.168.168.15
       secret_encrypted: "$9$sDYJGTQ36/tgon9puhcKM87VskqfFnCz3"
 
 auth_order:

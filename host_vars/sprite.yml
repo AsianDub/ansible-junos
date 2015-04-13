@@ -19,4 +19,4 @@ syslog_prefix:
     SPRITE
 
 packet_based:
-    False
+    True

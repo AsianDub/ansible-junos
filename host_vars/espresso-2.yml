@@ -8,8 +8,8 @@ my_domain_name:
     lab
 
 management:
-    ifd: vlan
-    ip: 192.168.100.16
+    ifd: vme
+    ip: 192.168.100.17
     subnet_bits: 24
 
 local_timezone:

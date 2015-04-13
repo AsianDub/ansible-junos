@@ -19,4 +19,4 @@ syslog_prefix:
     DRPEPPER
 
 packet_based:
-    False
+    True
